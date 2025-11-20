@@ -37,7 +37,8 @@ async def generate_report(
 @router.get("/list")
 async def list_reports(user_data: dict = Depends(verify_token)):
     with get_db_connection() as conn:
-        cursor = cursor.execute("""
+        cursor = conn.cursor()
+        cursor.execute("""
             SELECT * FROM reports 
             WHERE user_id = ? 
             ORDER BY created_at DESC

@@ -1,0 +1,262 @@
+version: '3.8'
+
+# Production Docker Compose Configuration
+# Week 11-12: Complete production deployment with all services
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: cybershield-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cybershield}
+      POSTGRES_USER: ${POSTGRES_USER:-cybershield_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - cybershield-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cybershield_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: cybershield-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    volumes:
+      - redis_data:/data
+    networks:
+      - cybershield-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cybershield-backend
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cybershield_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-cybershield}
+      
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/2
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY:-please-change-this-secret-key-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-please-change-this-jwt-secret-key}
+      
+      # Email
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      FROM_EMAIL: ${FROM_EMAIL}
+      
+      # External APIs
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SHODAN_API_KEY: ${SHODAN_API_KEY}
+      
+      # ChromaDB
+      CHROMA_DB_PATH: /app/chroma_db
+      
+      # Application
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      
+      # Sentry (Optional)
+      SENTRY_DSN: ${SENTRY_DSN}
+      
+    volumes:
+      - ./backend/logs:/app/logs
+      - chroma_data:/app/chroma_db
+      - report_data:/app/reports
+      - upload_data:/app/uploads
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks:
+      - cybershield-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cybershield-celery-worker
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cybershield_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-cybershield}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/2
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SHODAN_API_KEY: ${SHODAN_API_KEY}
+      CHROMA_DB_PATH: /app/chroma_db
+      ENVIRONMENT: production
+    volumes:
+      - ./backend/logs:/app/logs
+      - chroma_data:/app/chroma_db
+      - report_data:/app/reports
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For Docker sandbox
+    networks:
+      - cybershield-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  # Celery Beat (Scheduler)
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cybershield-celery-beat
+    command: celery -A workers.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cybershield_user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-cybershield}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/2
+      ENVIRONMENT: production
+    volumes:
+      - ./backend/logs:/app/logs
+    networks:
+      - cybershield-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Flower (Celery Monitoring)
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cybershield-flower
+    command: celery -A workers.celery_app flower --port=5555
+    environment:
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-changeme}@redis:6379/2
+    ports:
+      - "${FLOWER_PORT:-5555}:5555"
+    networks:
+      - cybershield-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cybershield-frontend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    networks:
+      - cybershield-network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nginx Reverse Proxy (Optional - for SSL termination)
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: cybershield-nginx-proxy
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - cybershield-network
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    profiles:
+      - with-ssl  # Only start with: docker-compose --profile with-ssl up
+
+networks:
+  cybershield-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  chroma_data:
+    driver: local
+  report_data:
+    driver: local
+  upload_data:
+    driver: local

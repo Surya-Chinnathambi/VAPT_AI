@@ -2,39 +2,50 @@ from fastapi import APIRouter, Depends
 import json
 from datetime import datetime, timedelta
 from typing import List, Dict
+from psycopg2.extras import RealDictCursor
 
 from routers.auth import verify_token
-from utils.database import get_user_scans, get_db_connection
+from database.connection import get_user_scans, get_db_connection, get_user_monthly_usage
 
 router = APIRouter()
 
 @router.get("/stats")
 async def get_dashboard_stats(user_data: dict = Depends(verify_token)):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT COUNT(*) FROM scan_results 
-            WHERE user_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
-        """, (user_data['user_id'],))
-        monthly_scans = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM scan_results WHERE user_id = ?", 
-                      (user_data['user_id'],))
-        total_scans = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM reports WHERE user_id = ?", 
-                      (user_data['user_id'],))
-        total_reports = cursor.fetchone()[0]
+    # Get monthly scan count
+    monthly_scans = get_user_monthly_usage(user_data['user_id'])
     
-    threat_level = calculate_threat_level(user_data['user_id'])
+    # Get total counts
+    with get_db_connection() as conn:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cursor.execute("SELECT COUNT(*) as count FROM scans WHERE user_id = %s", 
+                      (user_data['user_id'],))
+        total_scans = cursor.fetchone()['count']
+        
+        cursor.execute("SELECT COUNT(*) as count FROM reports WHERE user_id = %s", 
+                      (user_data['user_id'],))
+        total_reports = cursor.fetchone()['count']
+        cursor.close()
+    
+    scan_limit = 999 if user_data['role'] == 'pro' else 5
+    scans_remaining = max(0, scan_limit - monthly_scans)
+    
+    # Count vulnerabilities from scan results
+    vulnerabilities_found = 0
+    scans = get_user_scans(user_data['user_id'], limit=100)
+    for scan in scans:
+        try:
+            vulnerabilities_found += scan.get('vulnerabilities_found', 0)
+        except:
+            pass
     
     return {
-        "monthly_scans": monthly_scans,
         "total_scans": total_scans,
-        "total_reports": total_reports,
-        "threat_level": threat_level,
-        "scan_limit": 999 if user_data['role'] == 'pro' else 5
+        "vulnerabilities_found": vulnerabilities_found,
+        "scans_remaining": scans_remaining,
+        "subscription_tier": user_data['role'].capitalize(),
+        "monthly_scans": monthly_scans,
+        "total_reports": total_reports
     }
 
 @router.get("/activity")
@@ -44,9 +55,14 @@ async def get_activity(user_data: dict = Depends(verify_token)):
     scan_activity = []
     for scan in scans:
         try:
-            date = datetime.fromisoformat(scan['created_at'].replace('Z', '+00:00'))
+            created_at = scan['created_at']
+            if isinstance(created_at, str):
+                date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+            else:
+                date = created_at
+            
             scan_activity.append({
-                "date": date.date().isoformat(),
+                "date": date.date().isoformat() if hasattr(date, 'date') else str(date),
                 "scan_type": scan['scan_type'],
                 "target": scan['target']
             })
@@ -59,25 +75,13 @@ async def get_activity(user_data: dict = Depends(verify_token)):
 async def get_vulnerability_distribution(user_data: dict = Depends(verify_token)):
     scans = get_user_scans(user_data['user_id'], limit=50)
     
-    risk_counts = {'high': 0, 'medium': 0, 'low': 0}
+    risk_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
     
     for scan in scans:
         try:
-            results = json.loads(scan['results'])
-            
-            if scan['scan_type'] == 'web_scan':
-                risk_summary = results.get('risk_summary', {})
-                risk_counts['high'] += risk_summary.get('high', 0)
-                risk_counts['medium'] += risk_summary.get('medium', 0)
-                risk_counts['low'] += risk_summary.get('low', 0)
-            elif scan['scan_type'] == 'port_scan':
-                open_ports = len(results.get('open_ports', []))
-                if open_ports > 10:
-                    risk_counts['high'] += 1
-                elif open_ports > 5:
-                    risk_counts['medium'] += 1
-                else:
-                    risk_counts['low'] += 1
+            risk_level = scan.get('risk_level', 'low')
+            if risk_level in risk_counts:
+                risk_counts[risk_level] += 1
         except:
             continue
     

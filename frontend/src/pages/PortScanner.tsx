@@ -23,12 +23,25 @@ export default function PortScanner() {
     setResults(null)
 
     try {
-      const portArray = ports ? ports.split(',').map(p => parseInt(p.trim())) : undefined
-      const response = await scanAPI.portScan(host, portArray, scanType)
+      // Use Nmap scan for better results
+      const response = await scanAPI.nmapScan(host, scanType)
       setResults(response.data)
-      showToast.success('Scan completed successfully!')
+
+      if (response.data.status === 'queued') {
+        showToast.success('Scan started! Check status for results.', { duration: 5000 })
+      } else {
+        showToast.success('Scan completed successfully!')
+      }
     } catch (error: any) {
-      showToast.error(error.response?.data?.detail || 'Scan failed')
+      console.error('Scan error:', error)
+      const errorMsg = error.response?.data?.detail || error.message || 'Scan failed'
+      if (errorMsg.includes('limit reached')) {
+        showToast.error('Monthly scan limit reached. Please upgrade your plan or wait until next month.')
+      } else if (errorMsg.includes('Invalid target')) {
+        showToast.error('Invalid target. Please enter a valid IP address or hostname.')
+      } else {
+        showToast.error(errorMsg)
+      }
     } finally {
       setIsScanning(false)
     }
@@ -84,9 +97,12 @@ export default function PortScanner() {
                 onChange={(e) => setScanType(e.target.value)}
                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 text-white"
               >
-                <option value="quick">Quick Scan</option>
-                <option value="full">Full Scan</option>
-                <option value="stealth">Stealth Scan</option>
+                <option value="quick">Quick Scan (Top 100 ports - Fast)</option>
+                <option value="full">Full Scan (All 65535 ports + Version Detection)</option>
+                <option value="vuln">Vulnerability Scan (NSE Scripts)</option>
+                <option value="web">Web Application Scan (HTTP/HTTPS)</option>
+                <option value="stealth">Stealth Scan (SYN Stealth)</option>
+                <option value="aggressive">Aggressive Scan (OS + Scripts)</option>
               </select>
             </div>
 
@@ -113,22 +129,52 @@ export default function PortScanner() {
         <motion.div variants={scaleIn} initial="hidden" animate="visible">
           <GlowingCard title="Scan Results" accentColor="green">
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <p className="text-gray-400 text-sm">Host</p>
-                  <p className="text-white font-semibold">{results.host}</p>
+                  <p className="text-gray-400 text-sm">Target</p>
+                  <p className="text-white font-semibold">{results.results?.target || results.host}</p>
                 </div>
                 <div>
                   <p className="text-gray-400 text-sm">Open Ports</p>
-                  <p className="text-white font-semibold">{results.open_ports?.length || 0}</p>
+                  <p className="text-white font-semibold">{results.results?.summary?.open_ports || results.open_ports?.length || 0}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Vulnerabilities</p>
+                  <p className="text-red-400 font-semibold">{results.vulnerabilities_found || 0}</p>
                 </div>
               </div>
 
-              {results.open_ports && results.open_ports.length > 0 && (
+              {results.results?.vulnerabilities && results.results.vulnerabilities.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-red-400 font-semibold mb-2">⚠️ Vulnerabilities Detected:</h4>
+                  <div className="space-y-2">
+                    {results.results.vulnerabilities.map((vuln: any, idx: number) => (
+                      <motion.div
+                        key={idx}
+                        initial={{ x: -20, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ delay: idx * 0.05 }}
+                        className="p-3 bg-red-900/20 rounded-lg border border-red-700"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-red-400 font-semibold">Port {vuln.port}</span>
+                            <p className="text-gray-300 text-sm mt-1">{vuln.name}</p>
+                            <p className="text-gray-400 text-xs mt-1">{vuln.description}</p>
+                          </div>
+                          <span className="text-xs px-2 py-1 bg-red-600 rounded">{vuln.severity}</span>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {results.results?.ports && results.results.ports.length > 0 && (
                 <div className="mt-4">
                   <h4 className="text-white font-semibold mb-2">Open Ports:</h4>
                   <div className="space-y-2">
-                    {results.open_ports.map((port: any, idx: number) => (
+                    {results.results.ports.map((port: any, idx: number) => (
                       <motion.div
                         key={idx}
                         initial={{ x: -20, opacity: 0 }}
@@ -137,12 +183,28 @@ export default function PortScanner() {
                         className="p-3 bg-gray-800 rounded-lg border border-gray-700"
                       >
                         <div className="flex justify-between items-center">
-                          <span className="text-cyan-400 font-mono">Port {port.port}</span>
-                          <span className="text-gray-400">{port.service}</span>
+                          <div>
+                            <span className="text-cyan-400 font-mono">Port {port.port}</span>
+                            <span className="text-gray-400 ml-3">{port.service}</span>
+                          </div>
+                          {port.version && <span className="text-gray-500 text-sm">{port.version}</span>}
                         </div>
                       </motion.div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {results.results?.os_detection && (
+                <div className="mt-4 p-3 bg-blue-900/20 rounded-lg border border-blue-700">
+                  <h4 className="text-blue-400 font-semibold mb-2">OS Detection:</h4>
+                  <p className="text-white">{results.results.os_detection}</p>
+                </div>
+              )}
+
+              {results.nmap_available === false && (
+                <div className="mt-4 p-3 bg-yellow-900/20 rounded-lg border border-yellow-700">
+                  <p className="text-yellow-400 text-sm">⚠️ Nmap not installed. Using fallback Python scanner.</p>
                 </div>
               )}
             </div>

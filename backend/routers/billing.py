@@ -2,9 +2,10 @@ from fastapi import APIRouter, HTTPException, Depends
 import stripe
 import os
 from datetime import datetime
+from psycopg2.extras import RealDictCursor
 
 from routers.auth import verify_token
-from utils.database import get_db_connection
+from database.connection import get_db_connection, get_user_monthly_usage
 
 router = APIRouter()
 
@@ -38,22 +39,21 @@ async def get_plans():
 async def get_subscription(user_data: dict = Depends(verify_token)):
     current_plan = user_data.get('role', 'free')
     
+    # Get monthly usage
+    monthly_scans = get_user_monthly_usage(user_data['user_id'])
+    
+    # Get total counts
     with get_db_connection() as conn:
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        cursor.execute("""
-            SELECT COUNT(*) FROM scan_results 
-            WHERE user_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
-        """, (user_data['user_id'],))
-        monthly_scans = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM scan_results WHERE user_id = ?", 
+        cursor.execute("SELECT COUNT(*) as count FROM scans WHERE user_id = %s", 
                       (user_data['user_id'],))
-        total_scans = cursor.fetchone()[0]
+        total_scans = cursor.fetchone()['count']
         
-        cursor.execute("SELECT COUNT(*) FROM reports WHERE user_id = ?", 
+        cursor.execute("SELECT COUNT(*) as count FROM reports WHERE user_id = %s", 
                       (user_data['user_id'],))
-        total_reports = cursor.fetchone()[0]
+        total_reports = cursor.fetchone()['count']
+        cursor.close()
     
     plan_info = PRICING_PLANS.get(current_plan, PRICING_PLANS['free'])
     
@@ -79,9 +79,10 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail="Invalid plan")
     
     with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT email FROM users WHERE id = ?", (user_data['user_id'],))
-        user_email = cursor.fetchone()[0]
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT email FROM users WHERE id = %s", (user_data['user_id'],))
+        user_email = cursor.fetchone()['email']
+        cursor.close()
     
     try:
         session = stripe.checkout.Session.create(

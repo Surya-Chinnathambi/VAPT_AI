@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
@@ -29,7 +29,7 @@ api.interceptors.response.use(
 )
 
 export const authAPI = {
-  login: (username: string, password: string) => 
+  login: (username: string, password: string) =>
     api.post('/auth/login', { username, password }),
   register: (username: string, email: string, password: string) =>
     api.post('/auth/register', { username, email, password }),
@@ -38,21 +38,33 @@ export const authAPI = {
 }
 
 export const scanAPI = {
-  portScan: (host: string, ports?: number[], scan_type?: string) =>
-    api.post('/scan/port', { host, ports, scan_type }),
+  portScan: (target: string, ports?: string, scan_type?: string) =>
+    api.post('/scan/port', { target, ports, scan_type }),
+  nmapScan: (target: string, scan_type: string = 'quick', async_mode: boolean = true) =>
+    api.post('/scan/nmap', { target, scan_type, async_mode }),
   webScan: (url: string, options?: any) =>
-    api.post('/scan/web', { url, options }),
+    api.post('/scan/web', { url, ...options }),
   getHistory: (limit = 10) =>
     api.get(`/scan/history?limit=${limit}`),
   getResult: (scanId: number) =>
-    api.get(`/scan/result/${scanId}`)
+    api.get(`/scan/result/${scanId}`),
+  getScanStatus: (scanId: string) =>
+    api.get(`/scan/status/${scanId}`),
+  getStats: () =>
+    api.get('/scan/stats')
 }
 
 export const chatAPI = {
-  sendMessage: (message: string, context?: string, history?: any[]) =>
-    api.post('/chat/message', { message, context, history }),
+  sendMessage: (message: string, context?: string, history?: any[], session_id?: string) =>
+    api.post('/chat/message', { message, context, history, session_id }),
   analyzeScan: (scan_type: string, results: any) =>
-    api.post('/chat/analyze', { scan_type, results })
+    api.post('/chat/analyze', { scan_type, results }),
+  getConversations: (limit = 10) =>
+    api.get(`/chat/conversations?limit=${limit}`),
+  getConversation: (sessionId: string) =>
+    api.get(`/chat/conversation/${sessionId}`),
+  deleteConversation: (sessionId: string) =>
+    api.delete(`/chat/conversation/${sessionId}`)
 }
 
 export const dashboardAPI = {
@@ -62,8 +74,12 @@ export const dashboardAPI = {
 }
 
 export const cveAPI = {
-  search: (keyword: string, limit = 20) =>
-    api.get(`/cve/search?keyword=${keyword}&limit=${limit}`),
+  search: (query: string, limit = 20, page = 1) =>
+    api.get(`/cve/search?query=${encodeURIComponent(query)}&limit=${limit}&page=${page}`),
+  aiSearch: (query: string, limit = 20) =>
+    api.get(`/cve/ai-search?query=${encodeURIComponent(query)}&limit=${limit}`),
+  getRecent: (days = 7, limit = 50) =>
+    api.get(`/cve/recent?days=${days}&limit=${limit}`),
   getDetails: (cveId: string) =>
     api.get(`/cve/details/${cveId}`)
 }
@@ -79,7 +95,9 @@ export const shodanAPI = {
 
 export const exploitsAPI = {
   search: (query: string, exploit_type?: string, platform?: string, limit = 50) =>
-    api.get(`/exploits/search?query=${query}&exploit_type=${exploit_type || ''}&platform=${platform || ''}&limit=${limit}`),
+    api.get(`/exploits/search?query=${encodeURIComponent(query)}&exploit_type=${exploit_type || ''}&platform=${platform || ''}&limit=${limit}`),
+  getByCVE: (cveId: string) =>
+    api.get(`/exploits/by-cve/${cveId}`),
   getDetails: (exploitId: string) =>
     api.get(`/exploits/details/${exploitId}`)
 }
@@ -87,16 +105,66 @@ export const exploitsAPI = {
 export const billingAPI = {
   getPlans: () => api.get('/billing/plans'),
   getSubscription: () => api.get('/billing/subscription'),
-  createCheckout: (plan: string) =>
-    api.post('/billing/create-checkout', { plan })
+  createCheckout: (priceId: string) =>
+    api.post('/billing/create-checkout', { price_id: priceId })
 }
 
 export const reportsAPI = {
-  generate: (report_name: string) =>
-    api.post('/reports/generate', { report_name }),
+  generate: (scanId: string, reportType: string = 'pdf') =>
+    api.post('/reports/generate', { scan_id: scanId, report_type: reportType }),
   list: () => api.get('/reports/list'),
-  download: (reportId: number) =>
+  download: (reportId: string) =>
     api.get(`/reports/download/${reportId}`, { responseType: 'blob' })
+}
+
+export const complianceAPI = {
+  getFrameworks: () => api.get('/compliance/frameworks'),
+  getFramework: (frameworkCode: string) =>
+    api.get(`/compliance/frameworks/${frameworkCode}`),
+  mapVulnerabilities: (framework: string, vulnerabilities: any[]) =>
+    api.post('/compliance/map', { framework, vulnerabilities }),
+  assessCompliance: (framework: string, scanResults: any) =>
+    api.post('/compliance/assess', { framework, scan_results: scanResults })
+}
+
+export const realtimeVAPTAPI = {
+  getTools: () => api.get('/realtime/tools'),
+  getStats: () => api.get('/realtime/stats'),
+  quickScan: (target: string) =>
+    api.post(`/realtime/quick-scan?target=${encodeURIComponent(target)}`),
+  fullScan: (target: string) =>
+    api.post(`/realtime/full-scan?target=${encodeURIComponent(target)}`),
+  customScan: (target: string, tools: string[], scanType: string = 'standard', parallel: boolean = true, maxParallel: number = 5) =>
+    api.post('/realtime/scan', { target, tools, scan_type: scanType, parallel, max_parallel: maxParallel })
+}
+
+// WebSocket helper for real-time VAPT scans
+export const createRealtimeWebSocket = (scanId: string, onMessage: (data: any) => void) => {
+  const wsUrl = API_URL.replace('http', 'ws')
+  const ws = new WebSocket(`${wsUrl}/api/realtime/stream/${scanId}`)
+
+  ws.onopen = () => {
+    console.log('WebSocket connected')
+  }
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      onMessage(data)
+    } catch (error) {
+      console.error('Failed to parse WebSocket message:', error)
+    }
+  }
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error)
+  }
+
+  ws.onclose = () => {
+    console.log('WebSocket disconnected')
+  }
+
+  return ws
 }
 
 export default api

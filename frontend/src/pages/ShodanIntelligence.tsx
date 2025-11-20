@@ -18,12 +18,28 @@ export default function ShodanIntelligence() {
     }
 
     setIsSearching(true)
+    setResults([])
     try {
       const response = await shodanAPI.search(query)
-      setResults(response.data.matches || [])
-      showToast.success(`Found ${response.data.total || 0} results`)
+      const matches = response.data.matches || []
+      setResults(matches)
+      if (matches.length === 0) {
+        showToast.info('No results found. Try a different search query.')
+      } else {
+        showToast.success(`Found ${response.data.total || matches.length} results`)
+      }
     } catch (error: any) {
-      showToast.error(error.response?.data?.detail || 'Search failed')
+      console.error('Shodan search error:', error)
+      const errorMsg = error.response?.data?.detail || error.message || 'Search failed'
+      if (errorMsg.includes('not configured')) {
+        showToast.error('Shodan API key not configured. Please contact administrator.')
+      } else if (errorMsg.includes('API key')) {
+        showToast.error('Invalid Shodan API key. Please check configuration.')
+      } else if (errorMsg.includes('denied')) {
+        showToast.error('Shodan API access denied. API key may need upgrading.')
+      } else {
+        showToast.error(errorMsg)
+      }
     } finally {
       setIsSearching(false)
     }

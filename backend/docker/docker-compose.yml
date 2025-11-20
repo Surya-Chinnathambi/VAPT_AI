@@ -1,0 +1,196 @@
+# CyberShieldAI Docker Compose Configuration
+# Week 5-6: Container Orchestration with Security Controls
+
+version: '3.9'
+
+services:
+  # Main FastAPI Backend
+  backend:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    container_name: cybershield_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./cybershield.db}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - backend_data:/app/data
+      - scan_results:/app/results
+    depends_on:
+      - redis
+    networks:
+      - cybershield_network
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Backend needs write access
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis for Celery and Caching
+  redis:
+    image: redis:7-alpine
+    container_name: cybershield_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cybershield_network
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Celery Worker for Background Tasks
+  celery_worker:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    container_name: cybershield_celery
+    restart: unless-stopped
+    command: celery -A workers worker --loglevel=info --concurrency=4
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./cybershield.db}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - backend_data:/app/data
+      - scan_results:/app/results
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket for spawning scan containers
+    depends_on:
+      - redis
+    networks:
+      - cybershield_network
+      - scan_network
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Nmap Scanner Container (on-demand, not always running)
+  # This is a template - actual instances spawned by Celery
+  nmap_scanner:
+    build:
+      context: ./docker/nmap
+      dockerfile: Dockerfile
+    container_name: cybershield_nmap_template
+    restart: "no"  # Don't auto-restart, managed by Celery
+    networks:
+      - scan_network
+    volumes:
+      - scan_results:/results
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./docker/security/seccomp-nmap.json
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW  # Required for raw socket scans
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /scans
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+          pids: 100  # Limit number of processes
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    profiles:
+      - scanner  # Only start with --profile scanner
+
+  # Nikto Web Scanner Container (on-demand)
+  nikto_scanner:
+    build:
+      context: ./docker/nikto
+      dockerfile: Dockerfile
+    container_name: cybershield_nikto_template
+    restart: "no"
+    networks:
+      - scan_network
+    volumes:
+      - scan_results:/results
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./docker/security/seccomp-nikto.json
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /scans
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+          pids: 50
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    profiles:
+      - scanner
+
+networks:
+  cybershield_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  
+  scan_network:
+    driver: bridge
+    internal: false  # Needs external access for scanning
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+volumes:
+  backend_data:
+    driver: local
+  redis_data:
+    driver: local
+  scan_results:
+    driver: local

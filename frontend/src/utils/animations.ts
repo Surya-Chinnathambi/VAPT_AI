@@ -3,11 +3,11 @@ import { useState, useEffect } from 'react'
 
 export const fadeIn: Variants = {
   hidden: { opacity: 0 },
-  visible: { 
+  visible: {
     opacity: 1,
     transition: { duration: 0.3, ease: 'easeOut' }
   },
-  exit: { 
+  exit: {
     opacity: 0,
     transition: { duration: 0.2, ease: 'easeIn' }
   }
@@ -15,17 +15,17 @@ export const fadeIn: Variants = {
 
 export const slideUp: Variants = {
   hidden: { y: 20, opacity: 0 },
-  visible: { 
-    y: 0, 
+  visible: {
+    y: 0,
     opacity: 1,
-    transition: { 
+    transition: {
       type: 'spring',
       stiffness: 300,
       damping: 30
     }
   },
-  exit: { 
-    y: -20, 
+  exit: {
+    y: -20,
     opacity: 0,
     transition: { duration: 0.2 }
   }
@@ -33,17 +33,17 @@ export const slideUp: Variants = {
 
 export const scaleIn: Variants = {
   hidden: { scale: 0.8, opacity: 0 },
-  visible: { 
-    scale: 1, 
+  visible: {
+    scale: 1,
     opacity: 1,
-    transition: { 
+    transition: {
       type: 'spring',
       stiffness: 500,
       damping: 40
     }
   },
-  exit: { 
-    scale: 0.8, 
+  exit: {
+    scale: 0.8,
     opacity: 0,
     transition: { duration: 0.2 }
   }
@@ -51,16 +51,16 @@ export const scaleIn: Variants = {
 
 export const pageTransition: Variants = {
   hidden: { opacity: 0, x: -20 },
-  visible: { 
-    opacity: 1, 
+  visible: {
+    opacity: 1,
     x: 0,
     transition: {
       duration: 0.3,
       ease: [0.6, -0.05, 0.01, 0.99]
     }
   },
-  exit: { 
-    opacity: 0, 
+  exit: {
+    opacity: 0,
     x: 20,
     transition: { duration: 0.2 }
   }
@@ -92,12 +92,12 @@ export const staggerItem: Variants = {
 
 export const hoverScale = {
   scale: 1.03,
-  transition: { type: 'spring', stiffness: 400, damping: 10 }
+  transition: { type: 'spring' as const, stiffness: 400, damping: 10 }
 }
 
 export const tapScale = {
   scale: 0.97,
-  transition: { type: 'spring', stiffness: 400, damping: 10 }
+  transition: { type: 'spring' as const, stiffness: 400, damping: 10 }
 }
 
 export const floatAnimation = {
@@ -105,7 +105,7 @@ export const floatAnimation = {
   transition: {
     duration: 3,
     repeat: Infinity,
-    ease: 'easeInOut'
+    ease: 'easeInOut' as const
   }
 }
 
@@ -114,7 +114,7 @@ export const glowPulse = {
   transition: {
     duration: 2,
     repeat: Infinity,
-    ease: 'easeInOut'
+    ease: 'easeInOut' as const
   }
 }
 
@@ -123,7 +123,7 @@ export const rotateAura = {
   transition: {
     duration: 20,
     repeat: Infinity,
-    ease: 'linear'
+    ease: 'linear' as const
   }
 }
 
@@ -132,23 +132,23 @@ export const rippleAnimation = {
   opacity: [1, 0],
   transition: {
     duration: 0.6,
-    ease: 'linear'
+    ease: 'linear' as const
   }
 }
 
 export const useReducedMotion = () => {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
-  
+
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
     setPrefersReducedMotion(mediaQuery.matches)
-    
+
     const handleChange = () => setPrefersReducedMotion(mediaQuery.matches)
     mediaQuery.addEventListener('change', handleChange)
-    
+
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
-  
+
   return prefersReducedMotion
 }
 

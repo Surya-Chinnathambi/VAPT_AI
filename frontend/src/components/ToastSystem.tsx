@@ -1,33 +1,6 @@
 import toast, { Toaster } from 'react-hot-toast'
 import { motion } from 'framer-motion'
-import Lottie from 'lottie-react'
 import { CheckCircleIcon, XCircleIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
-
-const successLottie = {
-  v: '5.5.7',
-  fr: 60,
-  ip: 0,
-  op: 60,
-  w: 100,
-  h: 100,
-  nm: 'Success',
-  ddd: 0,
-  assets: [],
-  layers: [{
-    ddd: 0,
-    ind: 1,
-    ty: 4,
-    nm: 'Check',
-    sr: 1,
-    ks: {
-      o: { a: 0, k: 100 },
-      r: { a: 0, k: 0 },
-      p: { a: 0, k: [50, 50, 0] },
-      a: { a: 0, k: [0, 0, 0] },
-      s: { a: 0, k: [100, 100, 100] }
-    }
-  }]
-}
 
 export function ToastSystem() {
   return (

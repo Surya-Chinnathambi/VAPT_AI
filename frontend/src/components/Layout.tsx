@@ -33,7 +33,7 @@ const navItems = [
   { name: 'Billing', path: '/billing', icon: CreditCardIcon }
 ]
 
-export default function Layout({ children, setIsLoading }: LayoutProps) {
+export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
 
   const handleLogout = () => {
@@ -42,7 +42,7 @@ export default function Layout({ children, setIsLoading }: LayoutProps) {
   }
 
   return (
-    <motion.div 
+    <motion.div
       className="min-h-screen bg-gray-950 flex"
       variants={pageTransition}
       initial="hidden"
@@ -66,11 +66,10 @@ export default function Layout({ children, setIsLoading }: LayoutProps) {
             return (
               <Link key={item.path} to={item.path}>
                 <motion.div
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive
                       ? 'bg-blue-600 text-white'
                       : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                  }`}
+                    }`}
                   whileHover={{ x: 4 }}
                   whileTap={{ scale: 0.98 }}
                 >
