@@ -122,6 +122,8 @@ export default function AIChat() {
         <button
           onClick={() => setShowConversations(!showConversations)}
           className="bg-gray-900/50 border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors"
+          aria-label="Toggle conversations panel"
+          title="Toggle conversations panel"
         >
           <ChatBubbleLeftRightIcon className="w-6 h-6 text-blue-500 mx-auto" />
         </button>
@@ -147,8 +149,8 @@ export default function AIChat() {
                   key={conv.session_id}
                   onClick={() => loadConversation(conv.session_id)}
                   className={`p-3 rounded-lg cursor-pointer transition-colors group ${sessionId === conv.session_id
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-800 hover:bg-gray-700 text-gray-300'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-800 hover:bg-gray-700 text-gray-300'
                     }`}
                 >
                   <div className="flex justify-between items-start mb-1">
@@ -158,6 +160,8 @@ export default function AIChat() {
                     <button
                       onClick={(e) => deleteConversation(conv.session_id, e)}
                       className="opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label="Delete conversation"
+                      title="Delete conversation"
                     >
                       <TrashIcon className="w-4 h-4 text-red-400 hover:text-red-300" />
                     </button>

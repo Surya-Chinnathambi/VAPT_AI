@@ -6,6 +6,7 @@ import requests
 import json
 import redis
 import uuid
+import logging
 from datetime import datetime
 
 from routers.auth import verify_token
@@ -13,6 +14,7 @@ from core.rate_limiting import limiter, ai_chat_limit
 from database.connection import get_db_cursor
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "https://litellm.dev.asoclab.dev/v1")
@@ -231,6 +233,49 @@ async def chat_message(
             if db_history:
                 cache_conversation_in_redis(session_id, db_history)
         
+        # Save user message to database
+        save_message_to_db(conversation_id, "user", request.message)
+        
+        # NEW: Check if message requires security tool execution
+        from services.ai_chat_tool_bridge import get_ai_chat_bridge
+        
+        try:
+            chat_bridge = get_ai_chat_bridge()
+            bridge_result = await chat_bridge.process_chat_message(
+                user_message=request.message,
+                session_id=session_id,
+                progress_callback=None  # TODO: Add WebSocket support
+            )
+            
+            # If tools were executed, use the bridge response
+            if bridge_result.get('tools_executed'):
+                ai_response = bridge_result['ai_response']
+                
+                # Save AI response with scan metadata
+                save_message_to_db(
+                    conversation_id, 
+                    "assistant", 
+                    ai_response,
+                    metadata={
+                        'tools_executed': bridge_result['tools_executed'],
+                        'target': bridge_result.get('target'),
+                        'execution_summary': bridge_result.get('execution_summary')
+                    }
+                )
+                
+                return {
+                    "message": ai_response,
+                    "response": ai_response,
+                    "session_id": session_id,
+                    "tools_executed": bridge_result['tools_executed'],
+                    "scan_results": bridge_result.get('scan_results'),
+                    "target": bridge_result.get('target')
+                }
+        except Exception as bridge_error:
+            logger.warning(f"AI chat bridge error (continuing with standard chat): {bridge_error}")
+            # Continue with standard chat flow
+        
+        # Otherwise, use standard AI chat flow
         # Build messages for OpenAI
         messages = [{"role": "system", "content": SECURITY_SYSTEM_PROMPT}]
         
@@ -243,9 +288,6 @@ async def chat_message(
         
         # Add new user message
         messages.append({"role": "user", "content": request.message})
-        
-        # Save user message to database
-        save_message_to_db(conversation_id, "user", request.message)
         
         # Call OpenAI/LiteLLM API
         response_content = call_openai_api(messages, max_tokens=2000)

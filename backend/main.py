@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 from routers import (
     auth, scanning, chat, cve, shodan, exploits, billing, 
-    reports, dashboard, compliance, vector_search, realtime_scan, vapt, realtime_vapt, ai_training
+    reports, dashboard, compliance, vector_search, realtime_scan, vapt, realtime_vapt, ai_training, ai_vapt, websocket_vapt, realtime_vapt_complete
 )
 from core.rate_limiting import limiter, rate_limit_handler
 from core.sentry_config import init_sentry
@@ -126,7 +126,10 @@ app.include_router(vector_search.router, tags=["vector-search"])
 app.include_router(vector_search.agents_router, tags=["ai-agents"])
 app.include_router(realtime_scan.router, prefix="/api/realtime", tags=["realtime-scanning"])
 app.include_router(realtime_vapt.router, prefix="/api/realtime", tags=["realtime-vapt-88-tools"])
+app.include_router(realtime_vapt_complete.router, tags=["RealTime-VAPT-Complete"])
 app.include_router(vapt.router, prefix="/api", tags=["ai-powered-vapt"])
+app.include_router(ai_vapt.router, tags=["AI-VAPT-Orchestrator"])
+app.include_router(websocket_vapt.router, tags=["WebSocket-RealTime"])
 app.include_router(ai_training.router, tags=["AI Training"])
 
 if __name__ == "__main__":

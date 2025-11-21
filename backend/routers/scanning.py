@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request, Response
 import json
 import os
 from typing import List, Dict, Optional
@@ -30,6 +30,7 @@ class NmapScanRequest(BaseModel):
 @limiter.limit("10/minute")  # Rate limit: 10 scans per minute
 async def nmap_scan(
     request: Request,
+    response: Response,
     scan_request: NmapScanRequest,
     user_data: dict = Depends(verify_token)
 ):

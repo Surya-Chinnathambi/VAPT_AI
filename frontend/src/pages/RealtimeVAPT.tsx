@@ -6,7 +6,6 @@ import { GlowingCard } from '@/components/GlowingCard'
 import {
     PlayIcon,
     StopIcon,
-    ChartBarIcon,
     ShieldCheckIcon,
     ExclamationTriangleIcon,
     CheckCircleIcon,
@@ -43,7 +42,6 @@ export default function RealtimeVAPT() {
     const [availableTools, setAvailableTools] = useState<any[]>([])
     const [scanType, setScanType] = useState('standard')
     const [isScanning, setIsScanning] = useState(false)
-    const [scanId, setScanId] = useState<string | null>(null)
     const [toolStatuses, setToolStatuses] = useState<Record<string, ToolStatus>>({})
     const [messages, setMessages] = useState<RealtimeMessage[]>([])
     const [vulnerabilities, setVulnerabilities] = useState<any[]>([])
@@ -135,7 +133,7 @@ export default function RealtimeVAPT() {
     }
 
     const startRealtimeScan = (scanData: any) => {
-        setScanId(scanData.scan_id)
+        // scanData.scan_id is available but not stored as we track via WebSocket
         setIsScanning(true)
         setMessages([])
         setVulnerabilities([])
@@ -212,7 +210,7 @@ export default function RealtimeVAPT() {
             wsRef.current = null
         }
         setIsScanning(false)
-        showToast.info('Scan stopped')
+        showToast.success('Scan stopped')
     }
 
     const toggleTool = (toolName: string) => {
@@ -294,6 +292,8 @@ export default function RealtimeVAPT() {
                                 onChange={(e) => setScanType(e.target.value)}
                                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 text-white"
                                 disabled={isScanning}
+                                aria-label="Scan Type"
+                                title="Select VAPT scan type"
                             >
                                 <option value="quick">Quick (Fast)</option>
                                 <option value="standard">Standard (Recommended)</option>
@@ -343,8 +343,8 @@ export default function RealtimeVAPT() {
                                 onClick={() => toggleTool(tool.name)}
                                 disabled={isScanning}
                                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${selectedTools.includes(tool.name)
-                                        ? 'bg-green-600 text-white'
-                                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                                     } disabled:opacity-50`}
                             >
                                 {tool.name}

@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 class CVESearchTool(BaseTool):
     """Tool for searching CVE database"""
     
-    name = "search_cves"
-    description = """
+    name: str = "search_cves"
+    description: str = """
     Search the CVE database for vulnerabilities.
     Input should be a search query describing the vulnerability.
     Returns relevant CVE entries with severity, CVSS scores, and descriptions.
@@ -71,8 +71,8 @@ class CVESearchTool(BaseTool):
 class ExploitSearchTool(BaseTool):
     """Tool for searching exploit database"""
     
-    name = "search_exploits"
-    description = """
+    name: str = "search_exploits"
+    description: str = """
     Search the exploit database for proof-of-concept exploits.
     Input should be a CVE ID or vulnerability description.
     Returns available exploits with platform, type, and exploit details.
@@ -113,8 +113,8 @@ class ExploitSearchTool(BaseTool):
 class SecurityKnowledgeTool(BaseTool):
     """Tool for searching security knowledge base"""
     
-    name = "search_security_knowledge"
-    description = """
+    name: str = "search_security_knowledge"
+    description: str = """
     Search the security knowledge base for best practices, mitigation strategies, and security advisories.
     Input should be a security topic or vulnerability type.
     Returns relevant security guidance and recommendations.

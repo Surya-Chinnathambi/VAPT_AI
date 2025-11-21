@@ -15,7 +15,7 @@ from .scenario_generator import (
 )
 from .tool_executor import get_tool_executor
 from .training_manager import TrainingManager
-from .performance_tracker import PerformanceTracker
+from .performance_tracker import AIVAPTPerformanceTracker
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class EnhancedTrainingManager:
     def __init__(self):
         self.tool_executor = get_tool_executor()
         self.training_manager = TrainingManager()
-        self.performance_tracker = PerformanceTracker()
+        self.performance_tracker = AIVAPTPerformanceTracker()
         
         # Load all scenarios
         self.all_scenarios = {

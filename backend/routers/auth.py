@@ -12,10 +12,16 @@ from core.rate_limiting import limiter
 # Try to use PostgreSQL, fallback to SQLite
 try:
     from database.connection import get_db_connection as get_pg_connection
+    get_db_connection = get_pg_connection
     USE_POSTGRES = True
-except:
-    from utils.database import get_db_connection
-    USE_POSTGRES = False
+except Exception as e:
+    print(f"Failed to import PostgreSQL connection: {e}")
+    try:
+        from utils.database import get_db_connection
+        USE_POSTGRES = False
+    except Exception as e2:
+        print(f"Failed to import SQLite connection: {e2}")
+        raise Exception(f"No database connection available. PG error: {e}, SQLite error: {e2}")
 
 router = APIRouter()
 security = HTTPBearer()

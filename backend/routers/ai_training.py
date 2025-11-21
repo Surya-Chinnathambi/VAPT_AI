@@ -9,8 +9,8 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import logging
 
-from backend.ai_training.enhanced_training import get_enhanced_training_manager
-from backend.ai_training.performance_tracker import get_performance_tracker
+from ai_training.enhanced_training import get_enhanced_training_manager
+from ai_training.performance_tracker import get_performance_tracker
 
 logger = logging.getLogger(__name__)
 

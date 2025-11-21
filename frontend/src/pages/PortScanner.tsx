@@ -96,6 +96,8 @@ export default function PortScanner() {
                 value={scanType}
                 onChange={(e) => setScanType(e.target.value)}
                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 text-white"
+                aria-label="Scan Type"
+                title="Select scan type"
               >
                 <option value="quick">Quick Scan (Top 100 ports - Fast)</option>
                 <option value="full">Full Scan (All 65535 ports + Version Detection)</option>
