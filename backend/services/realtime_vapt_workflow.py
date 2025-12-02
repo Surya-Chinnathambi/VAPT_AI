@@ -238,6 +238,15 @@ class RealtimeVAPTWorkflow:
             "standard": ["nuclei", "nikto", "wpscan", "testssl"],
             "full": ["nuclei", "nikto", "wpscan", "testssl", "sqlmap", "zaproxy"]
         }.get(intensity, ["nuclei", "nikto"])
+
+        # For web targets (URLs), always ensure a deep web tool set
+        # regardless of intensity, so apps like Juice Shop get full coverage.
+        if target.startswith("http://") or target.startswith("https://"):
+            core_web_tools = ["nmap", "nuclei", "nikto", "sqlmap", "zaproxy", "testssl"]
+            # Merge and deduplicate while preserving order
+            for t in core_web_tools:
+                if t not in scan_tools:
+                    scan_tools.append(t)
         
         tasks = []
         for tool in scan_tools:
@@ -256,17 +265,22 @@ class RealtimeVAPTWorkflow:
             if result.get("success"):
                 findings = result.get("findings_count", 0)
                 if findings > 0:
+                    parsed = result.get("parsed_results", {}) or {}
                     vulnerabilities.append({
                         "tool": tool,
                         "count": findings,
-                        "details": result.get("parsed_results", {})
+                        "details": parsed
                     })
-                    self.findings.extend([{
-                        "source": tool,
-                        "target": target,
-                        "severity": "medium",  # TODO: Parse from results
-                        "description": f"Finding from {tool}"
-                    }] * findings)
+
+                    # Derive severities per tool from parsed output/log structure
+                    severities = self._derive_severities_from_tool(tool, parsed, default_count=findings)
+                    for sev in severities:
+                        self.findings.append({
+                            "source": tool,
+                            "target": target,
+                            "severity": sev,
+                            "description": f"Finding from {tool} ({sev})"
+                        })
         
         scan_data = {
             "tools_executed": list(results.keys()),
@@ -318,6 +332,42 @@ class RealtimeVAPTWorkflow:
                 "remediation_priority": self._calculate_priority(risk_score)
             }
             analyzed_findings.append(analyzed_finding)
+        
+        # Group by severity
+        severity_breakdown = {
+            "critical": len([f for f in analyzed_findings if f["severity"] == "critical"]),
+            "high": len([f for f in analyzed_findings if f["severity"] == "high"]),
+            "medium": len([f for f in analyzed_findings if f["severity"] == "medium"]),
+            "low": len([f for f in analyzed_findings if f["severity"] == "low"]),
+            "info": len([f for f in analyzed_findings if f["severity"] == "info"])
+        }
+        
+        # AI analysis summary
+        analysis_prompt = f"""Analyze these security scan results and provide:
+1. Overall risk assessment
+2. Top 5 critical issues
+3. Recommended immediate actions
+
+Findings: {len(analyzed_findings)} total
+Breakdown: {severity_breakdown}
+"""
+        
+        ai_summary = "Security analysis complete."  # TODO: Call AI service
+        
+        analysis_data = {
+            "analyzed_findings": analyzed_findings,
+            "severity_breakdown": severity_breakdown,
+            "ai_summary": ai_summary,
+            "overall_risk": self._calculate_overall_risk(severity_breakdown)
+        }
+        
+        await self._send_progress({
+            "type": "phase_completed",
+            "phase": "analysis",
+            "summary": f"Risk Level: {analysis_data['overall_risk']}"
+        })
+        
+        return analysis_data
         
         # Group by severity
         severity_breakdown = {
@@ -511,6 +561,74 @@ Breakdown: {severity_breakdown}
             "hipaa": ["164.308"],
             "gdpr": ["Article 32"]
         }
+
+    def _derive_severities_from_tool(self, tool: str, parsed: Dict[str, Any], default_count: int) -> List[str]:
+        """Derive a list of severities for findings from a specific tool.
+
+        This uses simple, explainable heuristics based on common output structures
+        for nuclei, nikto, sqlmap, zaproxy, testssl, etc. If structured data is
+        not available, it falls back to a conservative default.
+        """
+        severities: List[str] = []
+
+        # 1) Nuclei: expect a list of issues with severity fields
+        if tool == "nuclei":
+            issues = parsed.get("issues") or parsed.get("results") or []
+            for issue in issues:
+                sev = (issue.get("severity") or "medium").lower()
+                if sev not in ("critical", "high", "medium", "low"):
+                    sev = "medium"
+                severities.append(sev)
+
+        # 2) Nikto: high/med/low counts
+        elif tool == "nikto":
+            counts = parsed.get("severity_counts") or {}
+            severities.extend(["high"] * int(counts.get("high", 0)))
+            severities.extend(["medium"] * int(counts.get("medium", 0)))
+            severities.extend(["low"] * int(counts.get("low", 0)))
+
+        # 3) sqlmap: treat confirmed injections as high/critical depending on flags
+        elif tool == "sqlmap":
+            vulns = parsed.get("vulnerabilities") or []
+            for v in vulns:
+                risk = (v.get("risk") or "").lower()
+                if risk in ("3", "high", "critical"):
+                    severities.append("critical")
+                elif risk in ("2", "medium"):
+                    severities.append("high")
+                else:
+                    severities.append("medium")
+
+        # 4) zaproxy: issues with risk field
+        elif tool == "zaproxy":
+            alerts = parsed.get("alerts") or []
+            for a in alerts:
+                risk = (a.get("risk") or a.get("riskcode") or "").lower()
+                if isinstance(risk, str):
+                    if "high" in risk or risk == "3":
+                        severities.append("high")
+                    elif "medium" in risk or risk == "2":
+                        severities.append("medium")
+                    elif "low" in risk or risk == "1":
+                        severities.append("low")
+
+        # 5) testssl: map grade or finding categories
+        elif tool == "testssl":
+            grade = (parsed.get("grade") or "").upper()
+            if grade in ("F", "T", "M"):
+                severities.append("critical")
+            elif grade in ("E", "D"):
+                severities.append("high")
+            elif grade in ("C",):
+                severities.append("medium")
+            elif grade in ("B", "A"):
+                severities.append("low")
+
+        # 6) Fallback: if we detected findings but have no structure, assign medium
+        if not severities and default_count > 0:
+            severities = ["medium"] * default_count
+
+        return severities
 
 
 # Global instance

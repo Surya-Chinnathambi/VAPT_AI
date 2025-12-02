@@ -1,6 +1,7 @@
 """
 AI Chat to Real-Time Security Scanning Bridge
 Connects AI chat messages to Docker-based security tools execution
+Integrated with Kali Linux for comprehensive VAPT
 """
 import asyncio
 import json
@@ -12,7 +13,9 @@ from datetime import datetime
 from core.realtime_tool_executor import RealtimeToolExecutor
 from core.enhanced_docker_manager import get_enhanced_docker_manager
 from services.ai_chat_service import get_chat_service
+from services.kali_tools_executor import get_kali_executor
 from core.ai_security_prompts import get_system_prompt
+from mcp_server.tools import VaptMcpTools
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +30,50 @@ class AIChatToolBridge:
         self.tool_executor = RealtimeToolExecutor()
         self.docker_manager = get_enhanced_docker_manager()
         self.chat_service = get_chat_service()
+        self.kali_executor = get_kali_executor()  # Kali Linux tools
+        self.mcp_tools = VaptMcpTools() # Initialize MCP Tools
         
-        # Tool trigger keywords mapping
+        # Expanded tool keywords with Kali tools
         self.tool_keywords = {
-            'nmap': ['scan', 'port', 'nmap', 'network', 'service detection'],
+            # Network Scanning
+            'nmap': ['scan', 'port', 'nmap', 'network', 'service detection', 'host discovery'],
+            'masscan': ['masscan', 'fast scan', 'port sweep'],
+            
+            # Web Scanning
             'nikto': ['nikto', 'web scan', 'web vulnerabilities', 'http'],
-            'nuclei': ['nuclei', 'template', 'multiple vulnerabilities'],
+            'nuclei': ['nuclei', 'template', 'multiple vulnerabilities', 'cve scan'],
             'sqlmap': ['sql injection', 'sqlmap', 'database', 'sql'],
             'wpscan': ['wordpress', 'wp', 'wpscan', 'cms'],
+            'dirb': ['dirb', 'directory', 'bruteforce'],
+            'gobuster': ['gobuster', 'directory scan', 'brute force', 'files'],
+            'ffuf': ['ffuf', 'fuzzing', 'web fuzzer'],
+            'wfuzz': ['wfuzz', 'parameter fuzzing'],
+            'commix': ['commix', 'command injection'],
+            'zaproxy': ['zap', 'web app', 'proxy', 'spider', 'owasp zap'],
+            'wafw00f': ['waf', 'firewall detection', 'wafw00f'],
+            
+            # SSL/TLS
             'testssl': ['ssl', 'tls', 'certificate', 'https', 'testssl'],
-            'gobuster': ['directory', 'gobuster', 'brute force', 'files'],
-            'sublist3r': ['subdomain', 'sublist3r', 'dns'],
-            'amass': ['amass', 'recon', 'asset discovery'],
-            'zaproxy': ['zap', 'web app', 'proxy', 'spider'],
+            'sslyze': ['sslyze', 'ssl configuration'],
+            'sslscan': ['sslscan', 'ssl cipher'],
+            
+            # Reconnaissance
+            'subfinder': ['subdomain', 'subfinder', 'dns enumeration'],
+            'amass': ['amass', 'recon', 'asset discovery', 'osint'],
+            'sublist3r': ['sublist3r', 'subdomain enumeration'],
+            'theharvester': ['harvester', 'email', 'osint', 'domain info'],
+            'dnsenum': ['dnsenum', 'dns records'],
+            'whatweb': ['whatweb', 'technology', 'fingerprint'],
+            
+            # Exploitation
+            'metasploit': ['metasploit', 'msfconsole', 'exploit', 'framework'],
+            'searchsploit': ['searchsploit', 'exploitdb', 'exploit search'],
+            
+            # Password Cracking
+            'hydra': ['hydra', 'password crack', 'brute force login'],
+            'john': ['john', 'john the ripper', 'hash crack'],
+            
+            # Other
             'trivy': ['trivy', 'container', 'docker scan', 'image'],
             'git-secrets': ['git secrets', 'credentials', 'api keys']
         }
@@ -86,9 +120,9 @@ class AIChatToolBridge:
         # Step 3: Determine which tools to run
         tools_to_execute = self._determine_tools(user_message, intent_analysis)
         
-        # Step 4: Execute tools if target detected (only if Docker is available)
+        # Step 4: Execute tools if target detected
         scan_results = {}
-        if target and tools_to_execute and self.tool_executor.docker_available:
+        if target and tools_to_execute:
             logger.info(f"Target: {target}, Tools: {tools_to_execute}, Type: {scan_type}")
             
             # Notify user that scan is starting
@@ -100,26 +134,46 @@ class AIChatToolBridge:
                     "scan_type": scan_type
                 })
             
-            # Execute tools in parallel
+            # TRY MCP EXECUTION FIRST (N2N Architecture)
+            mcp_executed = False
             try:
-                scan_results = await self._execute_tools_parallel(
-                    target=target,
-                    tools=tools_to_execute,
-                    scan_type=scan_type,
-                    progress_callback=progress_callback
-                )
-            except Exception as e:
-                logger.error(f"Tool execution failed: {e}")
-                scan_results = {
-                    "error": "Docker not accessible from backend container. Tools cannot execute.",
-                    "message": "To enable scanning, configure Docker socket access or use external scanning service."
-                }
-        elif target and tools_to_execute and not self.tool_executor.docker_available:
-            logger.warning("Docker not available - skipping tool execution")
-            scan_results = {
-                "error": "Docker not available",
-                "message": "Security scanning tools require Docker access. Please configure Docker socket mounting."
-            }
+                if "nmap" in tools_to_execute or "scan" in tools_to_execute:
+                    logger.info("Delegating to MCP Server for N2N execution...")
+                    # Use MCP Tool
+                    mcp_result = await self.mcp_tools.handle_call_tool(
+                        "run_vapt_scan", 
+                        {"target": target, "scan_type": scan_type}
+                    )
+                    
+                    scan_results["mcp_vapt"] = {
+                        "status": "initiated",
+                        "details": mcp_result.content[0]['text'] if mcp_result.content else "Scan started via MCP"
+                    }
+                    mcp_executed = True
+            except Exception as mcp_error:
+                logger.error(f"MCP Execution failed: {mcp_error}")
+
+            # Fallback to Docker execution if MCP didn't handle it or failed
+            if not mcp_executed and self.tool_executor.docker_available:
+                try:
+                    scan_results = await self._execute_tools_parallel(
+                        target=target,
+                        tools=tools_to_execute,
+                        scan_type=scan_type,
+                        progress_callback=progress_callback
+                    )
+                except Exception as e:
+                    logger.error(f"Tool execution failed: {e}")
+                    scan_results = {
+                        "error": "Docker not accessible from backend container. Tools cannot execute.",
+                        "message": "To enable scanning, configure Docker socket access or use external scanning service."
+                    }
+            elif not mcp_executed:
+                logger.warning("Docker not available - skipping tool execution")
+                scan_results.update({
+                    "error": "Docker not available",
+                    "message": "Security scanning tools require Docker access. Please configure Docker socket mounting."
+                })
         
         # Step 5: Generate AI response with scan results
         ai_response = await self._generate_response_with_results(
@@ -288,18 +342,48 @@ Respond in JSON format:
         scan_type: str,
         progress_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
-        """Execute multiple tools in parallel"""
-        logger.info(f"Executing {len(tools)} tools on {target}")
+        """Execute multiple tools in parallel using Kali Linux container"""
+        logger.info(f"Executing {len(tools)} Kali tools on {target}")
+        
+        # Map tools to Kali executor methods
+        kali_tools_map = {
+            'nmap': lambda: self.kali_executor.nmap_scan(target, scan_type),
+            'masscan': lambda: self.kali_executor.masscan_scan(target),
+            'nikto': lambda: self.kali_executor.nikto_scan(target),
+            'nuclei': lambda: self.kali_executor.nuclei_scan(target),
+            'sqlmap': lambda: self.kali_executor.sqlmap_scan(target),
+            'wpscan': lambda: self.kali_executor.wpscan_scan(target),
+            'testssl': lambda: self.kali_executor.testssl_scan(target),
+            'gobuster': lambda: self.kali_executor.gobuster_scan(target),
+            'dirb': lambda: self.kali_executor.dirb_scan(target),
+            'ffuf': lambda: self.kali_executor.ffuf_scan(target),
+            'wfuzz': lambda: self.kali_executor.wfuzz_scan(target),
+            'commix': lambda: self.kali_executor.commix_scan(target),
+            'zaproxy': lambda: self.kali_executor.zaproxy_scan(target),
+            'wafw00f': lambda: self.kali_executor.wafw00f_scan(target),
+            'sslyze': lambda: self.kali_executor.sslyze_scan(target),
+            'sslscan': lambda: self.kali_executor.sslscan_scan(target),
+            'subfinder': lambda: self.kali_executor.subfinder_scan(target),
+            'amass': lambda: self.kali_executor.amass_enum(target),
+            'dnsenum': lambda: self.kali_executor.dnsenum_scan(target),
+            'whatweb': lambda: self.kali_executor.whatweb_scan(target),
+            'theharvester': lambda: self.kali_executor.theharvester_scan(target),
+        }
         
         tasks = []
         for tool in tools:
-            task = self.tool_executor.execute_tool_realtime(
-                tool_name=tool,
-                target=target,
-                scan_type=scan_type,
-                progress_callback=progress_callback
-            )
-            tasks.append(task)
+            if tool in kali_tools_map:
+                # Use Kali Linux container
+                tasks.append(kali_tools_map[tool]())
+            else:
+                # Fallback to original executor
+                task = self.tool_executor.execute_tool_realtime(
+                    tool_name=tool,
+                    target=target,
+                    scan_type=scan_type,
+                    progress_callback=progress_callback
+                )
+                tasks.append(task)
         
         # Execute all tools concurrently
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -327,66 +411,133 @@ Respond in JSON format:
         scan_results: Dict[str, Any]
     ) -> str:
         """Generate AI response incorporating scan results"""
-        # Build context with scan results
-        context_parts = [f"User request: {user_message}"]
+        # Always use fallback response for now to avoid AI service errors
+        # TODO: Fix AI chat service endpoint configuration
+        logger.info("Generating response with scan results")
         
-        if target:
-            context_parts.append(f"Target analyzed: {target}")
-        
-        if scan_results:
-            context_parts.append("\n=== SCAN RESULTS ===")
-            for tool, result in scan_results.items():
-                if result.get('success'):
-                    findings_count = result.get('findings_count', 0)
-                    context_parts.append(
-                        f"\n{tool.upper()}: {findings_count} findings, "
-                        f"Duration: {result.get('duration', 0):.1f}s"
-                    )
-                    
-                    # Add parsed results
-                    if 'parsed_results' in result:
-                        parsed = result['parsed_results']
-                        context_parts.append(f"  Details: {json.dumps(parsed, indent=2)}")
-                else:
-                    context_parts.append(f"\n{tool.upper()}: Failed - {result.get('error')}")
-        
-        context = "\n".join(context_parts)
-        
-        # Generate AI response
-        try:
-            response = await self.chat_service.chat(
-                message=f"{user_message}\n\nBased on the scan results above, provide a comprehensive security analysis.",
-                history=None,
-                context=context
-            )
-            return response.get('response', 'Scan completed. Check results above.')
-        
-        except Exception as e:
-            logger.error(f"AI response generation failed: {e}")
+        # If no scan results, provide consultation response
+        if not scan_results or all(not r.get('success') for r in scan_results.values()):
             return self._create_fallback_response(scan_results)
+        
+        # Build comprehensive response
+        return self._create_detailed_response(user_message, target, scan_results)
     
     def _create_fallback_response(self, scan_results: Dict[str, Any]) -> str:
         """Create fallback response if AI fails"""
         if not scan_results:
             return "No scans were executed. Please specify a target URL or IP address."
         
-        response_parts = ["✅ Security scan completed:\n"]
+        return self._create_detailed_response("Security scan", None, scan_results)
+    
+    def _create_detailed_response(
+        self, 
+        user_message: str, 
+        target: Optional[str], 
+        scan_results: Dict[str, Any]
+    ) -> str:
+        """Create detailed security analysis response"""
+        response_parts = []
+        
+        # Header
+        response_parts.append("🔒 **VULNERABILITY ASSESSMENT & PENETRATION TEST RESULTS**")
+        response_parts.append("=" * 80)
+        
+        if target:
+            response_parts.append(f"\n🎯 **Target**: {target}")
+        
+        response_parts.append(f"📅 **Scan Time**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        response_parts.append(f"🔧 **Tools Used**: {', '.join(scan_results.keys())}")
+        response_parts.append("")
+        
+        # Summary statistics
+        total_findings = 0
+        successful_scans = 0
+        total_duration = 0
         
         for tool, result in scan_results.items():
             if result.get('success'):
+                successful_scans += 1
+                total_findings += result.get('findings_count', 0)
+                total_duration += result.get('duration', 0)
+        
+        response_parts.append(f"✅ **Successful Scans**: {successful_scans}/{len(scan_results)}")
+        response_parts.append(f"🔍 **Total Findings**: {total_findings}")
+        response_parts.append(f"⏱️ **Total Duration**: {total_duration:.1f}s")
+        response_parts.append("")
+        
+        # Individual tool results
+        response_parts.append("## 📊 DETAILED SCAN RESULTS")
+        response_parts.append("")
+        
+        for tool, result in scan_results.items():
+            response_parts.append(f"### {tool.upper()}")
+            
+            if result.get('success'):
                 findings = result.get('findings_count', 0)
-                response_parts.append(
-                    f"- {tool.upper()}: {findings} findings ({result.get('duration', 0):.1f}s)"
-                )
+                duration = result.get('duration', 0)
+                
+                response_parts.append(f"- **Status**: ✅ Success")
+                response_parts.append(f"- **Findings**: {findings}")
+                response_parts.append(f"- **Duration**: {duration:.2f}s")
+                
+                # Add parsed results if available
+                if 'parsed_results' in result and result['parsed_results'].get('findings'):
+                    response_parts.append(f"- **Details**:")
+                    findings_list = result['parsed_results']['findings']
+                    
+                    for idx, finding in enumerate(findings_list[:5], 1):  # Show top 5
+                        if isinstance(finding, dict):
+                            desc = finding.get('description', finding.get('title', 'Finding'))
+                            severity = finding.get('severity', 'UNKNOWN')
+                            response_parts.append(f"  {idx}. [{severity}] {desc}")
+                        else:
+                            response_parts.append(f"  {idx}. {finding}")
+                    
+                    if len(findings_list) > 5:
+                        response_parts.append(f"  ... and {len(findings_list) - 5} more findings")
+                
+                elif findings > 0:
+                    raw_output = result.get('raw_output', '')
+                    if raw_output:
+                        response_parts.append(f"- **Sample Output**: {raw_output[:200]}...")
+                
             else:
-                response_parts.append(f"- {tool.upper()}: Failed")
+                response_parts.append(f"- **Status**: ❌ Failed")
+                response_parts.append(f"- **Error**: {result.get('error', 'Unknown error')}")
+            
+            response_parts.append("")
         
-        total_findings = sum(
-            r.get('findings_count', 0) for r in scan_results.values() if r.get('success')
-        )
+        # Risk assessment
+        response_parts.append("## 🎯 RISK ASSESSMENT")
+        response_parts.append("")
         
-        response_parts.append(f"\nTotal findings: {total_findings}")
-        response_parts.append("Review detailed results in the dashboard.")
+        if total_findings == 0:
+            response_parts.append("✅ **Risk Level**: LOW")
+            response_parts.append("No immediate vulnerabilities detected in this scan.")
+        elif total_findings < 5:
+            response_parts.append("⚠️ **Risk Level**: MEDIUM")
+            response_parts.append(f"Found {total_findings} potential security issues. Review and remediate.")
+        elif total_findings < 10:
+            response_parts.append("🔴 **Risk Level**: HIGH")
+            response_parts.append(f"Found {total_findings} security issues. Immediate attention required.")
+        else:
+            response_parts.append("🚨 **Risk Level**: CRITICAL")
+            response_parts.append(f"Found {total_findings}+ security issues. Urgent remediation needed.")
+        
+        response_parts.append("")
+        
+        # Recommendations
+        response_parts.append("## 💡 RECOMMENDATIONS")
+        response_parts.append("")
+        response_parts.append("1. Review all identified vulnerabilities in detail")
+        response_parts.append("2. Prioritize critical and high-severity findings")
+        response_parts.append("3. Implement security patches and configuration changes")
+        response_parts.append("4. Conduct a full penetration test for comprehensive assessment")
+        response_parts.append("5. Schedule regular security scans (weekly/monthly)")
+        response_parts.append("")
+        
+        response_parts.append("=" * 80)
+        response_parts.append("📋 **Full report available in the VAPT dashboard**")
         
         return "\n".join(response_parts)
     

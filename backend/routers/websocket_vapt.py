@@ -8,7 +8,7 @@ import json
 import asyncio
 import logging
 
-from routers.auth import verify_token_ws
+# from routers.auth import verify_token_ws  # TODO: Implement WebSocket auth
 from services.realtime_vapt_workflow import get_realtime_vapt_workflow
 
 logger = logging.getLogger(__name__)

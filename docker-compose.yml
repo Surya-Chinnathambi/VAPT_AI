@@ -49,6 +49,55 @@ services:
       - ALLOW_RESET=true
     restart: unless-stopped
 
+  # Kali Linux Pentesting Tools Container
+  kali-tools:
+    image: kalilinux/kali-rolling:latest
+    container_name: cybersec_kali
+    hostname: kali-pentest
+    volumes:
+      - kali_data:/root
+      - ./backend/scan_results:/scan_results
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    command: >
+      bash -c "
+      apt-get update && 
+      apt-get install -y --no-install-recommends
+      kali-tools-top10
+      metasploit-framework
+      nmap
+      nikto
+      sqlmap
+      wpscan
+      dirb
+      gobuster
+      hydra
+      john
+      hashcat
+      aircrack-ng
+      masscan
+      nuclei
+      subfinder
+      amass
+      dnsenum
+      sublist3r
+      theharvester
+      whatweb
+      wafw00f
+      sslyze
+      sslscan
+      testssl.sh
+      zaproxy
+      exploitdb
+      commix
+      wfuzz
+      ffuf
+      feroxbuster
+      && tail -f /dev/null
+      "
+    restart: unless-stopped
+
   # Backend API
   backend:
     build: ./backend
@@ -65,6 +114,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
+      - KALI_CONTAINER=cybersec_kali
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,12 +122,15 @@ services:
         condition: service_healthy
       chromadb:
         condition: service_started
+      kali-tools:
+        condition: service_started
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:
   redis_data:
   chroma_data:
+  kali_data:
 
 networks:
   default:

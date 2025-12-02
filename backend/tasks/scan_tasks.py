@@ -73,10 +73,11 @@ def run_port_scan(self, scan_id: int, target: str, ports: list = None, scan_type
         
         if chat_service.is_available():
             try:
-                analysis = await chat_service.analyze_scan_results(
+                import asyncio
+                analysis = asyncio.run(chat_service.analyze_scan_results(
                     'port_scan',
                     results
-                )
+                ))
                 summary = analysis.get('summary', summary)
             except Exception as e:
                 logger.error(f"AI analysis failed: {e}")
@@ -160,10 +161,11 @@ def run_web_scan(self, scan_id: int, target_url: str, options: dict = None):
         
         if chat_service.is_available():
             try:
-                analysis = await chat_service.analyze_scan_results(
+                import asyncio
+                analysis = asyncio.run(chat_service.analyze_scan_results(
                     'web_scan',
                     results
-                )
+                ))
                 summary = analysis.get('summary', summary)
             except Exception as e:
                 logger.error(f"AI analysis failed: {e}")
@@ -325,11 +327,12 @@ def analyze_scan_with_ai(scan_id: int, compliance_frameworks: list = None):
         if not chat_service.is_available():
             return {"error": "AI service not available"}
         
-        analysis = await chat_service.analyze_scan_results(
+        import asyncio
+        analysis = asyncio.run(chat_service.analyze_scan_results(
             scan.get('scan_type', scan.get('tool', 'unknown')),
             results,
             compliance_frameworks
-        )
+        ))
         
         # Update scan with analysis
         if USE_POSTGRES:
